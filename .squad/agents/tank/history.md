@@ -43,6 +43,44 @@
   recognized" regardless of code changes. Pre-existing, not introduced by any
   single task — flagged for Switch's CI/test-harness workstream (#10/#19).
 
+## 2026-09-01 — Dashboard "Send does nothing" bug (PR #33)
+- Reproduced end-to-end: two independent bugs stacked to fully silence the
+  Send button.
+  1. `media/dashboard/dashboard.js`: the agent-list cards and the command
+     bar's `#cmd-agent-selector` `<select>` were unsynchronized "selected
+     agent" sources. `selectAgent()` (card click) never wrote to the
+     `<select>`, so `updateSendState()` (gated on `cmdAgentSelector.value`)
+     kept the Send button `disabled` whenever a user picked an agent via the
+     more natural card UI instead of the dropdown. A disabled button
+     swallows clicks with zero signal — no postMessage, no error, no queue
+     entry: exactly the reported symptom.
+  2. `src/webview/dashboardPanel.ts`: even with (1) fixed, the host's
+     `enqueue-command` handler only called `commandQueueManager.enqueue(...)`
+     — it never dispatched to `copilotExecutor` (unlike the equivalent
+     command-palette flow in `enqueueCommand.ts`), so a sent command sat at
+     `"queued"` forever with no log output, and no `command-queued` /
+     `command-completed` listeners existed to push live queue updates to the
+     webview at all.
+- Fix: added `syncCommandBarAgentSelection()` in `dashboard.js` (called from
+  both the card-click and dropdown-`change` paths) plus wired
+  `copilotExecutor.executeTask(...)` dispatch + `command-queued` /
+  `command-completed` event listeners in `dashboardPanel.ts`. Failures from
+  the dispatch call itself (as opposed to normal task failures, which
+  `copilotExecutor` already surfaces) are now logged via `logError` and
+  shown with `vscode.window.showErrorMessage` so a broken send path is never
+  silent again.
+- Added `src/test/suite/dashboardPanel.test.ts`: registers this repo's own
+  `.squad/team.md` fixture, invokes `DashboardPanel`'s private
+  `handleWebviewMessage` (cast to `any` — there is no public API for
+  in-process webview message injection, and adding one solely for tests
+  would widen the class's contract) with an `enqueue-command` message, and
+  asserts the queue item progresses past `"queued"` — proving dispatch
+  happens instead of stalling forever. Full suite: 74 passing.
+- Observed this working directory is actively shared by other concurrent
+  agent sessions (branch checkouts and file edits interleaved mid-task on
+  `C:\git-decarufe\vscode-squad`). Did all edit/compile/test/commit work in
+  an isolated `git worktree` (this session's own workspace) instead, to
+  avoid racing another agent's checkout/reset and losing work.
 ## 2026-09-01 — Issue #9 (reopened): roster emoji regression from PR #24
 - Root cause: `deriveMemberEmoji()` (added by Trinity in PR #24) treats the
   leading whitespace-delimited token of `member.status` as the identity emoji

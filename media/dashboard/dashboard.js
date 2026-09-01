@@ -144,6 +144,7 @@
     renderAgentList(state.agents);
     renderLogViewer(state.logs);
     renderCommandQueue(state.commandQueue);
+    syncCommandBarAgentSelection();
   }
 
   function renderStats(stats) {
@@ -327,7 +328,7 @@
       header.appendChild(badge);
 
       var agentLine = createElement('div', 'queue-item__agent');
-      agentLine.textContent = item.agent || '';
+      agentLine.textContent = item.agentName || item.agent || '';
 
       var timeLine = createElement('div', 'queue-item__time');
       timeLine.textContent = formatTime(item.timestamp || item.createdAt);
@@ -406,19 +407,44 @@
 
     renderAgentList(state.agents);
     renderLogViewer(state.logs);
+    syncCommandBarAgentSelection();
 
     vscode.postMessage({ type: 'agent-selected', name: state.selectedAgent });
   }
 
   // --- Command bar ---
 
+  function syncCommandBarAgentSelection() {
+    if (!cmdAgentSelector) { return; }
+
+    var desired = state.selectedAgent || '';
+    if (desired && !hasSelectOption(cmdAgentSelector, desired)) {
+      desired = cmdAgentSelector.value;
+    }
+
+    cmdAgentSelector.value = desired;
+    updateSendButtonState();
+  }
+
+  function hasSelectOption(selectEl, value) {
+    for (var i = 0; i < selectEl.options.length; i++) {
+      if (selectEl.options[i].value === value) { return true; }
+    }
+    return false;
+  }
+
+  function updateSendButtonState() {
+    if (!cmdInput || !cmdSendBtn || !cmdAgentSelector) { return; }
+    var hasAgent = !!cmdAgentSelector.value;
+    var hasText = cmdInput.value.trim().length > 0;
+    cmdSendBtn.disabled = !(hasAgent && hasText);
+  }
+
   function setupCommandBar() {
     if (!cmdInput || !cmdSendBtn || !cmdAgentSelector) { return; }
 
     function updateSendState() {
-      var hasAgent = !!cmdAgentSelector.value;
-      var hasText = cmdInput.value.trim().length > 0;
-      cmdSendBtn.disabled = !(hasAgent && hasText);
+      updateSendButtonState();
     }
 
     cmdInput.addEventListener('input', function () {
@@ -428,7 +454,12 @@
       cmdInput.style.height = Math.min(cmdInput.scrollHeight, 80) + 'px';
     });
 
-    cmdAgentSelector.addEventListener('change', updateSendState);
+    cmdAgentSelector.addEventListener('change', function () {
+      state.selectedAgent = cmdAgentSelector.value || null;
+      state.logFilter.agent = state.selectedAgent;
+      renderAgentList(state.agents);
+      updateSendState();
+    });
 
     function sendCommand() {
       var agent = cmdAgentSelector.value;

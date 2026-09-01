@@ -35,7 +35,8 @@ function deriveLabel(ctx: SquadContext, isActive: boolean): string {
 function createSquadItem(ctx: SquadContext, isActive: boolean): SquadSelectorItem {
   const label = deriveLabel(ctx, isActive);
   const agentCount = ctx.agents.size;
-  return new SquadSelectorItem(label, ctx.squadDir, isActive, agentCount);
+  const qualifier = label.endsWith(ctx.squadName) ? undefined : ctx.squadName;
+  return new SquadSelectorItem(label, ctx.squadDir, isActive, agentCount, qualifier);
 }
 
 export class SquadSelectorItem extends vscode.TreeItem {
@@ -44,9 +45,17 @@ export class SquadSelectorItem extends vscode.TreeItem {
     public readonly squadPath: string,
     public readonly isActive: boolean,
     agentCount: number,
+    qualifier?: string,
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
-    this.description = isActive ? `(active) · ${agentCount} agents` : `${agentCount} agents`;
+    const parts = [`${agentCount} agents`];
+    if (isActive) {
+      parts.unshift('(active)');
+    }
+    if (qualifier) {
+      parts.push(qualifier);
+    }
+    this.description = parts.join(' · ');
     this.tooltip = squadPath;
     this.contextValue = isActive ? 'activeSquad' : 'squad';
     this.command = {

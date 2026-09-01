@@ -35,11 +35,10 @@ export async function handleSetAgentStatus(): Promise<void> {
   );
   if (!pick) { return; }
 
-  const agent = ctx.agents.get(name);
-  if (agent) {
-    agent.status = pick.value;
-    agent.lastActivity = Date.now();
-    eventBus.emit('agent-status', { agentName: name, status: pick.value });
-    vscode.window.showInformationMessage(`${name} is now ${pick.value}`);
-  }
+  // Broadcasting the event is enough: squadRegistry listens for
+  // `agent-status` and updates the runtime status/lastActivity for this
+  // agent in every context that has it, keeping the sidebar roster (and
+  // any other listener) in sync from a single source of truth.
+  eventBus.emit('agent-status', { agentName: name, status: pick.value });
+  vscode.window.showInformationMessage(`${name} is now ${pick.value}`);
 }

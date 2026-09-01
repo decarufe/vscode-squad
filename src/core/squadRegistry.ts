@@ -99,9 +99,13 @@ function emptyAgentStatistics(): AgentStatistics {
  * source of truth defined in team.md. Falls back to well-known identities
  * (Scribe, Ralph) by name, then a generic person emoji.
  */
-function deriveMemberEmoji(member: TeamState['members'][number]): string {
+export function deriveMemberEmoji(member: TeamState['members'][number]): string {
   const statusEmoji = member.status?.trim().split(/\s+/)[0];
-  if (statusEmoji && /\p{Emoji}/u.test(statusEmoji)) {
+  // '✅' is the generic default status glyph for ordinary "Active" members
+  // (see serializer.ts: `m.status ?? '✅ Active'`) — it is not an identity
+  // marker like Scribe's '📋' or Ralph's '🔄', so it must not be honored
+  // here or every plain active member would incorrectly render '✅'.
+  if (statusEmoji && statusEmoji !== '✅' && /\p{Emoji}/u.test(statusEmoji)) {
     return statusEmoji;
   }
   const lower = member.name.toLowerCase();
@@ -152,6 +156,25 @@ function buildAgentMap(teamState: TeamState): Map<string, AgentRuntime> {
 class SquadRegistry {
   private contexts = new Map<string, SquadContext>();
   private _activeSquadPath: string | undefined;
+
+  constructor() {
+    // Single source of truth for agent runtime status: whoever emits
+    // `agent-status` (commands, copilotExecutor, chat participant, webviews)
+    // only needs to broadcast the change — this keeps every squad context
+    // that has a matching agent name in sync, so the roster view (and any
+    // other reader of `ctx.agents`) can simply refresh from the map on the
+    // same event instead of each emitter reaching into context state itself.
+    eventBus.on('agent-status', ({ agentName, status }) => {
+      const now = Date.now();
+      for (const ctx of this.contexts.values()) {
+        const agent = ctx.agents.get(agentName);
+        if (agent) {
+          agent.status = status;
+          agent.lastActivity = now;
+        }
+      }
+    });
+  }
 
   get activeContext(): SquadContext | undefined {
     if (!this._activeSquadPath) {

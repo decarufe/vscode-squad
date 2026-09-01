@@ -153,6 +153,25 @@ class SquadRegistry {
   private contexts = new Map<string, SquadContext>();
   private _activeSquadPath: string | undefined;
 
+  constructor() {
+    // Single source of truth for agent runtime status: whoever emits
+    // `agent-status` (commands, copilotExecutor, chat participant, webviews)
+    // only needs to broadcast the change — this keeps every squad context
+    // that has a matching agent name in sync, so the roster view (and any
+    // other reader of `ctx.agents`) can simply refresh from the map on the
+    // same event instead of each emitter reaching into context state itself.
+    eventBus.on('agent-status', ({ agentName, status }) => {
+      const now = Date.now();
+      for (const ctx of this.contexts.values()) {
+        const agent = ctx.agents.get(agentName);
+        if (agent) {
+          agent.status = status;
+          agent.lastActivity = now;
+        }
+      }
+    });
+  }
+
   get activeContext(): SquadContext | undefined {
     if (!this._activeSquadPath) {
       return undefined;

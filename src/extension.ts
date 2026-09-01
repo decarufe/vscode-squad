@@ -68,6 +68,11 @@ export async function activate(context: vscode.ExtensionContext) {
   eventBus.on('log-entry', () => {
     activityProvider.refresh();
   });
+  eventBus.on('agent-status', () => {
+    // squadRegistry keeps ctx.agents in sync on this same event; refresh the
+    // sidebar so the running agent's row reflects the new status right away.
+    rosterProvider.refresh();
+  });
   eventBus.on('stats-updated', () => {
     updateStatusBar(squadNameItem, healthItem, actionsItem);
   });

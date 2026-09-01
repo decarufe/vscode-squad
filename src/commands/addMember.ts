@@ -2,8 +2,7 @@ import * as vscode from 'vscode';
 import { log } from '../utils/logger';
 import { TeamRosterProvider } from '../views/rosterTreeProvider';
 import { squadRegistry } from '../core/squadRegistry';
-import { Member, updateTeamState, scaffoldAgentDir } from '../team/teamState';
-import { eventBus } from '../core/eventBus';
+import { Member, scaffoldAgentDir } from '../team/teamState';
 
 export async function handleAddMember(
   context: vscode.ExtensionContext,
@@ -55,8 +54,7 @@ export async function handleAddMember(
     default: state.members = [...state.members, member]; break;
   }
 
-  await updateTeamState(state);
+  await squadRegistry.applyTeamState(ctx.squadDir, state);
   scaffoldAgentDir(ctx.squadDir, name, role);
-  eventBus.emit('team-changed', { squadPath: ctx.squadDir, state });
   vscode.window.showInformationMessage(`Squad: Added ${name} as ${role}`);
 }

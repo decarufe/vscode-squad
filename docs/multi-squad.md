@@ -26,6 +26,8 @@ your-workspace/
 └── package.json
 ```
 
+A workspace may also contain a flat `.squad/team.md` squad alongside `.squad/squads/` — see [Supported Layouts](#supported-layouts).
+
 ## Creating Multiple Squads
 
 Run `Squad: Create New Squad` multiple times. Each time you'll be prompted for a unique squad name. The extension validates that no two squads share the same name within a workspace folder.
@@ -91,9 +93,36 @@ Squad: Delete Squad
 
 Pick the squad to delete. Only the selected squad's directory is removed — other squads are untouched.
 
-## Legacy Support
+## Supported Layouts
 
-If your workspace has the older flat layout (`.squad/team.md` without a `squads/` subdirectory), the extension detects it automatically and registers it as a single squad. No migration needed.
+Two on-disk layouts are **both first-class**, and they may coexist in the same workspace folder:
+
+| Layout | Path | Use |
+|--------|------|-----|
+| **Nested (canonical)** | `.squad/squads/<name>/team.md` | Multiple squads per workspace. Created by `Squad: Create New Squad`. |
+| **Flat (interop)** | `.squad/team.md` | A single squad at the root of `.squad/`. Written by the `squad` coordinator/CLI and used by many existing repos. |
+
+```
+your-workspace/
+├── .squad/
+│   ├── team.md              ← flat squad (registered)
+│   ├── agents/
+│   ├── decisions.md
+│   └── squads/
+│       ├── frontend-team/   ← nested squad (registered)
+│       │   └── team.md
+│       └── backend-team/    ← nested squad (registered)
+│           └── team.md
+```
+
+A workspace like the one above shows **three** squads in the Squads panel. Discovery rules:
+
+- Every directory under `.squad/squads/` that contains a `team.md` is registered.
+- `.squad/team.md` is registered too — the presence of `.squad/squads/` no longer hides it.
+- The flat squad is named after the workspace folder (it would otherwise be called `.squad`); nested squads use their directory name.
+- Deleting a flat squad removes only its own files (`team.md`, `agents/`, `decisions*`, `routing.md`, `ceremonies*`, `casting/`, `log/`, `orchestration-log/`, `skills/`) — `.squad/squads/` is preserved.
+
+**Which layout should I use?** New squads created from the extension use the canonical nested layout. Keep an existing flat squad as-is: it interoperates with the coordinator agent and CLI, and the extension edits it in place without migrating it.
 
 ## Tips
 

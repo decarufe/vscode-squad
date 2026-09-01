@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { log } from '../utils/logger';
 import { parseTeamFile } from './parser';
 import { serializeTeamFile } from './serializer';
+import { markInternalChange } from './watcher';
 
 export interface Member {
   name: string;
@@ -26,10 +27,21 @@ export interface TeamState {
   };
 }
 
-let currentTeamState: TeamState | null = null;
+/**
+ * Resolve the `team.md` path for a squad directory (flat or nested layout).
+ */
+export function teamFilePathFor(squadDir: string): string {
+  return path.join(squadDir, 'team.md');
+}
 
-export async function loadTeamState(squadDir: string): Promise<TeamState | null> {
-  const teamFilePath = path.join(squadDir, 'team.md');
+/**
+ * Read and parse `team.md` from disk.
+ *
+ * This module holds no state: `core/squadRegistry` (`SquadContext`) is the
+ * single in-memory source of truth for team state.
+ */
+export function readTeamState(squadDir: string): TeamState | null {
+  const teamFilePath = teamFilePathFor(squadDir);
 
   if (!fs.existsSync(teamFilePath)) {
     log('Team file not found at', teamFilePath);
@@ -38,20 +50,21 @@ export async function loadTeamState(squadDir: string): Promise<TeamState | null>
 
   try {
     const content = fs.readFileSync(teamFilePath, 'utf-8');
-    currentTeamState = parseTeamFile(content, teamFilePath);
-    log('Team state loaded');
-    return currentTeamState;
+    return parseTeamFile(content, teamFilePath);
   } catch (err) {
     log('Error loading team state:', err);
     return null;
   }
 }
 
-export function getTeamState(): TeamState | null {
-  return currentTeamState;
-}
-
-export async function updateTeamState(newState: TeamState): Promise<void> {
+/**
+ * Serialize `state` and write it to disk, preserving unmanaged content.
+ *
+ * The write is flagged as internal so the registry's file watcher does not
+ * reload state the caller already applied. Callers should go through
+ * `squadRegistry.applyTeamState` so the in-memory context stays in sync.
+ */
+export async function writeTeamState(newState: TeamState): Promise<void> {
   const oldContent = fs.existsSync(newState.filePath)
     ? fs.readFileSync(newState.filePath, 'utf-8')
     : undefined;
@@ -60,9 +73,10 @@ export async function updateTeamState(newState: TeamState): Promise<void> {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  markInternalChange(newState.filePath);
   fs.writeFileSync(newState.filePath, markdown, 'utf-8');
-  currentTeamState = newState;
-  log('Team state updated and written to disk');
+  newState.lastModified = Date.now();
+  log('Team state written to disk:', newState.filePath);
 }
 
 export function scaffoldAgentDir(squadDir: string, agentName: string, role: string): void {

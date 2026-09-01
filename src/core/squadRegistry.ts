@@ -165,9 +165,11 @@ class SquadRegistry {
     const stats = emptyStatistics();
     stats.totalAgents = agents.size;
 
-    const teamFileUri = vscode.Uri.file(teamFilePath);
+    // Watch exactly `team.md` inside this squad directory. An empty glob
+    // (the previous implementation) never matches anything, so external
+    // edits silently failed to refresh the roster.
     const fileWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(teamFileUri, ''),
+      new vscode.RelativePattern(squadDir, 'team.md'),
     );
 
     const onTeamFileChange = () => {

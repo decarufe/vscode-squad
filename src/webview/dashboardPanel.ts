@@ -3,7 +3,9 @@ import { getNonce, getWebviewUri, getWebviewOptions } from './webviewBridge';
 import { squadRegistry } from '../core/squadRegistry';
 import { eventBus, type SquadEvents } from '../core/eventBus';
 import { logStore } from '../monitoring/logStore';
+import { logError } from '../utils/logger';
 import { commandQueueManager } from '../monitoring/commandQueue';
+import { copilotExecutor } from '../monitoring/copilotExecutor';
 import { statsEngine } from '../monitoring/statsEngine';
 import type {
   DashboardState,
@@ -142,7 +144,14 @@ export class DashboardPanel {
         break;
       case 'enqueue-command': {
         if ('agent' in message && 'command' in message) {
-          commandQueueManager.enqueue(message.agent, message.command);
+          const item = commandQueueManager.enqueue(message.agent, message.command);
+          // Mirror the command-palette flow (enqueueCommand.ts): enqueueing
+          // alone only records the item — it must also be dispatched to
+          // Copilot, otherwise it sits at "queued" forever with no log
+          // output, which is exactly the "Send does nothing" symptom.
+          copilotExecutor.executeTask(message.agent, message.command, item.id).catch((error) => {
+            logError(`Dashboard enqueue-command execution failed for ${message.agent}`, error);
+          });
         }
         break;
       }
@@ -200,6 +209,19 @@ export class DashboardPanel {
       }
     };
 
+    const onCommandQueued = (data: SquadEvents['command-queued']) => {
+      const msg: HostToWebviewMessage = { type: 'command-update', item: data.item };
+      this.panel.webview.postMessage(msg);
+    };
+
+    const onCommandCompleted = (data: SquadEvents['command-completed']) => {
+      const item = commandQueueManager.getQueue().find((queueItem) => queueItem.id === data.id);
+      if (item) {
+        const msg: HostToWebviewMessage = { type: 'command-update', item };
+        this.panel.webview.postMessage(msg);
+      }
+    };
+
     const onTeamChanged = (_data: SquadEvents['team-changed']) => {
       this.sendStateUpdate();
     };
@@ -207,6 +229,8 @@ export class DashboardPanel {
     eventBus.on('log-entry', onLogEntry);
     eventBus.on('agent-status', onAgentStatus);
     eventBus.on('stats-updated', onStatsUpdated);
+    eventBus.on('command-queued', onCommandQueued);
+    eventBus.on('command-completed', onCommandCompleted);
     eventBus.on('team-changed', onTeamChanged);
 
     const themeDisposable = vscode.window.onDidChangeActiveColorTheme((theme) => {
@@ -224,6 +248,8 @@ export class DashboardPanel {
       { dispose: () => eventBus.off('log-entry', onLogEntry) },
       { dispose: () => eventBus.off('agent-status', onAgentStatus) },
       { dispose: () => eventBus.off('stats-updated', onStatsUpdated) },
+      { dispose: () => eventBus.off('command-queued', onCommandQueued) },
+      { dispose: () => eventBus.off('command-completed', onCommandCompleted) },
       { dispose: () => eventBus.off('team-changed', onTeamChanged) },
     );
   }

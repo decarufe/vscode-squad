@@ -427,6 +427,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show health score in status bar"
+        },
+        "squad.execution.timeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "description": "Maximum seconds to wait for a Copilot response before a queued task is automatically marked failed. Guarantees a queued execution always resolves even if no result is received."
         }
       }
     },

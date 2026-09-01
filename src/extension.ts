@@ -7,6 +7,7 @@ import { SquadSelectorProvider } from './views/squadSelectorProvider';
 import { ActivityProvider } from './views/activityProvider';
 import { registerCommands } from './commands/index';
 import { registerChatParticipant } from './chat/squadChatParticipant';
+import { commandQueueManager } from './monitoring/commandQueue';
 
 let outputChannel: vscode.OutputChannel;
 
@@ -123,6 +124,7 @@ export async function activate(context: vscode.ExtensionContext) {
       dispose: () => {
         squadRegistry.dispose();
         eventBus.dispose();
+        commandQueueManager.dispose();
       },
     },
   );

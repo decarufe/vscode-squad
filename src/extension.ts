@@ -75,10 +75,10 @@ export async function activate(context: vscode.ExtensionContext) {
   const folderWatcher = vscode.workspace.onDidChangeWorkspaceFolders(
     async (e) => {
       for (const added of e.added) {
-        await squadRegistry.registerSquad(added.uri.fsPath);
+        await squadRegistry.scanWorkspaceFolder(added.uri.fsPath);
       }
       for (const removed of e.removed) {
-        squadRegistry.unregisterSquad(removed.uri.fsPath);
+        squadRegistry.unregisterFolder(removed.uri.fsPath);
       }
       selectorProvider.refresh();
       rosterProvider.refresh();

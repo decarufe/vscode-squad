@@ -2,8 +2,6 @@ import * as vscode from 'vscode';
 import { log } from '../utils/logger';
 import { TeamRosterProvider } from '../views/rosterTreeProvider';
 import { squadRegistry } from '../core/squadRegistry';
-import { updateTeamState } from '../team/teamState';
-import { eventBus } from '../core/eventBus';
 
 export async function handleEditMember(
   context: vscode.ExtensionContext,
@@ -51,7 +49,6 @@ export async function handleEditMember(
   };
   findAndUpdate(memberName);
 
-  await updateTeamState(state);
-  eventBus.emit('team-changed', { squadPath: ctx.squadDir, state });
+  await squadRegistry.applyTeamState(ctx.squadDir, state);
   vscode.window.showInformationMessage(`Squad: Updated ${memberName}'s ${field.toLowerCase()}`);
 }

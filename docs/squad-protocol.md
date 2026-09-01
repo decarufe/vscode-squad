@@ -1,11 +1,13 @@
 # Squad Protocol & File Formats
 
-This guide describes every file and directory inside a `.squad/squads/<name>/` directory. These files define how your AI agent squad is configured, operates, and records its work.
+This guide describes every file and directory inside a squad directory. These files define how your AI agent squad is configured, operates, and records its work.
+
+A squad directory is either `.squad/squads/<name>/` (canonical, multi-squad) or `.squad/` itself (flat, single squad — used by the `squad` coordinator/CLI). Both layouts contain the same files, are read and written identically by the extension, and may coexist in one workspace. See [Multi-Squad Workflow](multi-squad.md#supported-layouts).
 
 ## Directory Structure
 
 ```
-.squad/squads/<squad-name>/
+.squad/squads/<squad-name>/     # or .squad/ for the flat layout
 ├── team.md                 # Roster — agent names, roles, status
 ├── decisions.md            # Shared decision log all agents read
 ├── decisions/

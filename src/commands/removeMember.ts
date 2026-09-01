@@ -4,8 +4,6 @@ import * as path from 'path';
 import { log } from '../utils/logger';
 import { TeamRosterProvider } from '../views/rosterTreeProvider';
 import { squadRegistry } from '../core/squadRegistry';
-import { updateTeamState } from '../team/teamState';
-import { eventBus } from '../core/eventBus';
 
 export async function handleRemoveMember(
   context: vscode.ExtensionContext,
@@ -58,8 +56,7 @@ export async function handleRemoveMember(
     else if (state.codingAgent?.name === memberName) { state.codingAgent = null; }
     else { state.members = state.members.filter(m => m.name !== memberName); }
 
-    await updateTeamState(state);
-    eventBus.emit('team-changed', { squadPath: ctx.squadDir, state });
+    await squadRegistry.applyTeamState(ctx.squadDir, state);
     vscode.window.showInformationMessage(`Squad: Moved ${memberName} to alumni`);
   }
 }

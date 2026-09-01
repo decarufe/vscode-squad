@@ -5,8 +5,109 @@ import { copilotExecutor } from '../monitoring/copilotExecutor';
 import { eventBus } from '../core/eventBus';
 import { logStore } from '../monitoring/logStore';
 import { log } from '../utils/logger';
+import type { AgentRuntime } from '../core/types';
 
 const PARTICIPANT_ID = 'squad.chat';
+
+/**
+ * Pure parsing/matching helpers extracted from the chat command handlers so
+ * they can be unit-tested without spinning up the VS Code chat UI (`stream`,
+ * `request`, etc.). Behavior is unchanged from the inline logic they replace.
+ */
+
+/** Result of matching a `/switch` query against the known squads. */
+export type SquadQueryMatch<T> =
+  | { kind: 'exact' | 'partial-single'; match: T }
+  | { kind: 'ambiguous'; matches: T[] }
+  | { kind: 'none' };
+
+/**
+ * Match a `/switch` query against known squads: exact name match first, then
+ * a case-insensitive substring match. Mirrors the original inline logic in
+ * `handleSwitch` (exact -> single-partial -> ambiguous -> none).
+ */
+export function matchSquadByQuery<T extends { squadName: string }>(
+  squads: T[],
+  query: string,
+): SquadQueryMatch<T> {
+  const q = query.toLowerCase();
+
+  const exact = squads.find((s) => s.squadName.toLowerCase() === q);
+  if (exact) {
+    return { kind: 'exact', match: exact };
+  }
+
+  const partial = squads.filter((s) => s.squadName.toLowerCase().includes(q));
+  if (partial.length === 1) {
+    return { kind: 'partial-single', match: partial[0] };
+  }
+  if (partial.length > 1) {
+    return { kind: 'ambiguous', matches: partial };
+  }
+
+  return { kind: 'none' };
+}
+
+/** Parsed `@agent task` mention used by `/assign`. */
+export interface AssignMention {
+  agentName: string;
+  task: string;
+}
+
+/** Parse an `@agentName task text` mention out of an `/assign` prompt. */
+export function parseAssignMention(prompt: string): AssignMention | null {
+  const match = prompt.match(/^@(\S+)\s+(.+)$/);
+  if (!match) {
+    return null;
+  }
+  return { agentName: match[1], task: match[2] };
+}
+
+/** Parsed `/complete @agent success|failure [summary]` arguments. */
+export interface CompleteArgs {
+  agentName: string;
+  isSuccess: boolean;
+  summary?: string;
+}
+
+/** Parse the arguments of a `/complete` command. */
+export function parseCompleteArgs(prompt: string): CompleteArgs | null {
+  const match = prompt.match(/^@?(\S+)\s+(success|failure|done|error)(?:\s+(.*))?$/i);
+  if (!match) {
+    return null;
+  }
+  const [, agentName, statusRaw, summary] = match;
+  const isSuccess = statusRaw.toLowerCase() === 'success' || statusRaw.toLowerCase() === 'done';
+  return { agentName, isSuccess, summary: summary || undefined };
+}
+
+/** Parsed `/progress @agent message` arguments. */
+export interface ProgressArgs {
+  agentName: string;
+  message: string;
+}
+
+/** Parse the arguments of a `/progress` command. */
+export function parseProgressArgs(prompt: string): ProgressArgs | null {
+  const match = prompt.match(/^@?(\S+)\s+(.+)$/s);
+  if (!match) {
+    return null;
+  }
+  const [, agentName, message] = match;
+  return { agentName, message };
+}
+
+/**
+ * Find an agent by exact name match first, then case-insensitive substring
+ * match, mirroring the original inline logic in `handleAgents`.
+ */
+export function findAgentByQuery(
+  agents: [string, AgentRuntime][],
+  query: string,
+): [string, AgentRuntime] | undefined {
+  const q = query.toLowerCase();
+  return agents.find(([name]) => name.toLowerCase() === q || name.toLowerCase().includes(q));
+}
 
 export function registerChatParticipant(context: vscode.ExtensionContext): vscode.Disposable {
   const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, handler);
@@ -55,7 +156,7 @@ const handler: vscode.ChatRequestHandler = async (
   return handleDefault(request, stream);
 };
 
-function handleStatus(stream: vscode.ChatResponseStream): vscode.ChatResult {
+export function handleStatus(stream: vscode.ChatResponseStream): vscode.ChatResult {
   const ctx = squadRegistry.activeContext;
   if (!ctx) {
     stream.markdown('No active squad. Use `/switch` to pick one, or create a squad first.');
@@ -81,7 +182,7 @@ function handleStatus(stream: vscode.ChatResponseStream): vscode.ChatResult {
   return {};
 }
 
-async function handleSwitch(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): Promise<vscode.ChatResult> {
+export async function handleSwitch(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): Promise<vscode.ChatResult> {
   const squads = squadRegistry.allContexts;
   if (squads.length === 0) {
     stream.markdown('No squads found in the workspace.');
@@ -92,27 +193,18 @@ async function handleSwitch(request: vscode.ChatRequest, stream: vscode.ChatResp
   const query = request.prompt.trim().toLowerCase();
 
   if (query) {
-    // Try to match by name
-    const match = squads.find(s => s.squadName.toLowerCase() === query);
-    if (match) {
-      squadRegistry.setActiveSquad(match.squadDir);
-      stream.markdown(`Switched to **${match.squadName}**`);
+    const result = matchSquadByQuery(squads, query);
+
+    if (result.kind === 'exact' || result.kind === 'partial-single') {
+      squadRegistry.setActiveSquad(result.match.squadDir);
+      stream.markdown(`Switched to **${result.match.squadName}**`);
       stream.button({ command: 'squad.openDashboard', title: 'Open Dashboard' });
       return {};
     }
 
-    // Fuzzy match
-    const partial = squads.filter(s => s.squadName.toLowerCase().includes(query));
-    if (partial.length === 1) {
-      squadRegistry.setActiveSquad(partial[0].squadDir);
-      stream.markdown(`Switched to **${partial[0].squadName}**`);
-      stream.button({ command: 'squad.openDashboard', title: 'Open Dashboard' });
-      return {};
-    }
-
-    if (partial.length > 1) {
+    if (result.kind === 'ambiguous') {
       stream.markdown(`Multiple squads match "${query}":\n\n`);
-      for (const s of partial) {
+      for (const s of result.matches) {
         stream.markdown(`- **${s.squadName}**\n`);
       }
       stream.markdown('\nBe more specific or use the picker:');
@@ -138,7 +230,7 @@ async function handleSwitch(request: vscode.ChatRequest, stream: vscode.ChatResp
   return {};
 }
 
-async function handleAssign(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): Promise<vscode.ChatResult> {
+export async function handleAssign(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): Promise<vscode.ChatResult> {
   const ctx = squadRegistry.activeContext;
   if (!ctx) {
     stream.markdown('No active squad. Switch to one first.');
@@ -161,10 +253,9 @@ async function handleAssign(request: vscode.ChatRequest, stream: vscode.ChatResp
   }
 
   // Check if an @agent is specified
-  const mentionMatch = prompt.match(/^@(\S+)\s+(.+)$/);
-  if (mentionMatch) {
-    const targetName = mentionMatch[1];
-    const task = mentionMatch[2];
+  const mention = parseAssignMention(prompt);
+  if (mention) {
+    const { agentName: targetName, task } = mention;
     const found = agents.find(a => a.toLowerCase() === targetName.toLowerCase());
     if (!found) {
       stream.markdown(`Agent **${targetName}** not found. Available agents:\n\n`);
@@ -198,7 +289,7 @@ async function handleAssign(request: vscode.ChatRequest, stream: vscode.ChatResp
   return {};
 }
 
-function handleRoster(stream: vscode.ChatResponseStream): vscode.ChatResult {
+export function handleRoster(stream: vscode.ChatResponseStream): vscode.ChatResult {
   const ctx = squadRegistry.activeContext;
   if (!ctx) {
     stream.markdown('No active squad.');
@@ -231,7 +322,7 @@ function handleRoster(stream: vscode.ChatResponseStream): vscode.ChatResult {
   return {};
 }
 
-function handleAgents(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
+export function handleAgents(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
   const ctx = squadRegistry.activeContext;
   if (!ctx) {
     stream.markdown('No active squad.');
@@ -250,7 +341,7 @@ function handleAgents(request: vscode.ChatRequest, stream: vscode.ChatResponseSt
 
   // If a specific agent name was given, show detail for that agent
   if (query) {
-    const match = agents.find(([name]) => name.toLowerCase() === query || name.toLowerCase().includes(query));
+    const match = findAgentByQuery(agents, query);
     if (match) {
       const [name, a] = match;
       stream.markdown(`## ${a.emoji} ${a.name}\n\n`);
@@ -301,7 +392,7 @@ function handleAgents(request: vscode.ChatRequest, stream: vscode.ChatResponseSt
  * Handle /complete — Copilot signals task completion
  * Usage: @squad /complete @AgentName [success|failure] [summary]
  */
-function handleComplete(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
+export function handleComplete(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
   const ctx = squadRegistry.activeContext;
   if (!ctx) {
     stream.markdown('No active squad.');
@@ -310,16 +401,15 @@ function handleComplete(request: vscode.ChatRequest, stream: vscode.ChatResponse
 
   const prompt = request.prompt.trim();
   // Parse: @AgentName success|failure summary
-  const match = prompt.match(/^@?(\S+)\s+(success|failure|done|error)(?:\s+(.*))?$/i);
-  
-  if (!match) {
+  const parsed = parseCompleteArgs(prompt);
+
+  if (!parsed) {
     stream.markdown('Usage: `@squad /complete @AgentName success|failure [summary]`\n\n');
     stream.markdown('Example: `@squad /complete @Backend success Implemented user authentication`');
     return {};
   }
 
-  const [, agentName, statusRaw, summary] = match;
-  const isSuccess = statusRaw.toLowerCase() === 'success' || statusRaw.toLowerCase() === 'done';
+  const { agentName, isSuccess, summary } = parsed;
   
   // Find the agent
   const agent = ctx.agents.get(agentName);
@@ -369,7 +459,7 @@ function handleComplete(request: vscode.ChatRequest, stream: vscode.ChatResponse
  * Handle /progress — Copilot reports progress during task execution
  * Usage: @squad /progress @AgentName message
  */
-function handleProgress(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
+export function handleProgress(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
   const ctx = squadRegistry.activeContext;
   if (!ctx) {
     stream.markdown('No active squad.');
@@ -377,15 +467,15 @@ function handleProgress(request: vscode.ChatRequest, stream: vscode.ChatResponse
   }
 
   const prompt = request.prompt.trim();
-  const match = prompt.match(/^@?(\S+)\s+(.+)$/s);
-  
-  if (!match) {
+  const parsed = parseProgressArgs(prompt);
+
+  if (!parsed) {
     stream.markdown('Usage: `@squad /progress @AgentName <progress message>`\n\n');
     stream.markdown('Example: `@squad /progress @Backend Setting up database connection...`');
     return {};
   }
 
-  const [, agentName, message] = match;
+  const { agentName, message } = parsed;
   
   // Verify agent exists
   const agent = ctx.agents.get(agentName);
@@ -407,7 +497,7 @@ function handleProgress(request: vscode.ChatRequest, stream: vscode.ChatResponse
   return {};
 }
 
-function handleDefault(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
+export function handleDefault(request: vscode.ChatRequest, stream: vscode.ChatResponseStream): vscode.ChatResult {
   const ctx = squadRegistry.activeContext;
   const squadInfo = ctx ? `Active squad: **${ctx.squadName}** (${[...ctx.agents.keys()].length} agents)` : 'No active squad';
 

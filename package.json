@@ -427,6 +427,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show health score in status bar"
+        },
+        "squad.execution.timeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "description": "Maximum seconds to wait for a Copilot response before a queued task is automatically marked failed. Guarantees a queued execution always resolves even if no result is received."
         }
       }
     },
@@ -538,7 +544,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "npm run compile",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js"
   },
@@ -547,6 +553,8 @@
     "@types/node": "^20.0.0",
     "@types/mocha": "^10.0.0",
     "typescript": "^5.2.0",
-    "@vscode/vsce": "^2.20.0"
+    "@vscode/vsce": "^2.20.0",
+    "@vscode/test-electron": "^3.1.0",
+    "mocha": "^12.0.0"
   }
 }

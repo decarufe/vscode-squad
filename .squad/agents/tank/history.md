@@ -42,3 +42,36 @@
   `devDependencies` at all, so `eslint src --ext ts` fails with "not
   recognized" regardless of code changes. Pre-existing, not introduced by any
   single task — flagged for Switch's CI/test-harness workstream (#10/#19).
+
+## 2026-09-01 — Issue #9 (reopened): roster emoji regression from PR #24
+- Root cause: `deriveMemberEmoji()` (added by Trinity in PR #24) treats the
+  leading whitespace-delimited token of `member.status` as the identity emoji
+  whenever it matches `/\p{Emoji}/u`. But `src/team/serializer.ts` defaults
+  every ordinary member's status to `'✅ Active'`, and `✅` itself is a valid
+  emoji code point — so the "generic active" placeholder was mistaken for an
+  identity marker and every plain member (Neo/Trinity/Morpheus/Switch/Tank)
+  rendered `✅` instead of the intended `👤`. Scribe/Ralph were unaffected
+  because their real statuses (`📋 Silent`, `🔄 Monitor`) never collide.
+- Fix: added a narrow denylist check (`statusEmoji !== '✅'`) to the existing
+  fast path in `squadRegistry.ts` rather than restructuring the derivation
+  logic — keeps the blast radius to one line plus a comment explaining why.
+- Lesson: when a fallback/derivation function trusts a "leading emoji" signal
+  from free text, always check what the *default* value of that text is
+  before assuming any emoji present is meaningful. A generic placeholder
+  glyph (checkmark, bullet, etc.) can silently outrank the intended fallback
+  chain.
+- Reviewer rejection lockout: Trinity (original PR #24 author) was locked out
+  of producing this revision per reviewer state; Tank picked it up instead.
+  Confirmed via a throwaway `git worktree` (not the shared working directory)
+  that reverting just the export/fix reproduces the 4 failing acceptance
+  cases — useful pattern for validating a regression fix is real, not a
+  stale-build artifact, especially in a shared multi-agent working tree.
+- Shared working directory caution: mid-task, the shared repo's checked-out
+  branch changed under me (another agent's concurrent `git checkout`). Used
+  `git worktree add ../vscode-squad-tank-9 origin/main -b <branch>` to build,
+  test, commit, and push in complete isolation without touching or reverting
+  any other agent's uncommitted changes in the primary working directory.
+- PR #29 opened against `decarufe/vscode-squad` (not the `upstream` remote,
+  which points at `amih90/vscode-squad` — `gh pr create` defaults to
+  `upstream` if both remotes exist and repo isn't specified explicitly; use
+  `--repo decarufe/vscode-squad` in this repo's `gh` invocations).

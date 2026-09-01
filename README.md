@@ -172,6 +172,8 @@ Or jump straight into chat: **`@squad /status`**
         └── skills/               # (reserved)
 ```
 
+Squad also reads and writes the flat layout — the same files directly under `.squad/` (`.squad/team.md`, `.squad/agents/…`) as produced by the `squad` coordinator/CLI. Both layouts are first-class and can coexist in one workspace; see [Multi-Squad Workflow](docs/multi-squad.md#supported-layouts).
+
 </details>
 
 ## Templates

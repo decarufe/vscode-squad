@@ -1,52 +1,54 @@
-import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { log } from '../utils/logger';
-import { TeamRosterProvider } from '../views/rosterTreeProvider';
-import { loadTeamState } from './teamState';
-
-let isInternalChange = false;
 
 /**
- * Setup file watcher for team.md in a squad directory
- * @param squadDir - Root directory of the squad (containing team.md)
- * @param treeProvider - Tree provider to refresh on changes
- * @returns Disposable watcher
+ * Suppression window (ms) during which a file-system change event for a
+ * team.md written by the extension itself is ignored by the registry watcher.
  */
-export function setupWatcher(
-  squadDir: string,
-  treeProvider: TeamRosterProvider | undefined,
-): vscode.Disposable {
-  const teamFilePath = path.join(squadDir, 'team.md');
+const INTERNAL_CHANGE_WINDOW_MS = 1000;
 
-  if (!fs.existsSync(teamFilePath)) {
-    log('Team file does not exist, skipping watcher setup');
-    return new vscode.Disposable(() => {});
-  }
+const pendingInternalChanges = new Map<string, NodeJS.Timeout>();
 
-  log('Setting up file watcher for', teamFilePath);
-
-  const watcher = fs.watch(teamFilePath, async (eventType) => {
-    if (eventType === 'change' && !isInternalChange) {
-      log('Team file changed externally');
-      await loadTeamState(squadDir);
-      treeProvider?.refresh();
-      vscode.window.showInformationMessage('Team roster updated from disk');
-    }
-  });
-
-  return new vscode.Disposable(() => {
-    watcher.close();
-    log('File watcher closed');
-  });
+function key(teamFilePath: string): string {
+  return path.normalize(teamFilePath).toLowerCase();
 }
 
 /**
- * Mark the next file change as internal (don't reload)
+ * Mark an upcoming file-system change for `teamFilePath` as extension-authored
+ * so the registry watcher does not reload (and re-emit) state we already hold.
  */
-export function markInternalChange(): void {
-  isInternalChange = true;
-  setTimeout(() => {
-    isInternalChange = false;
-  }, 500);
+export function markInternalChange(teamFilePath: string): void {
+  const id = key(teamFilePath);
+  const existing = pendingInternalChanges.get(id);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  const timer = setTimeout(() => {
+    pendingInternalChanges.delete(id);
+  }, INTERNAL_CHANGE_WINDOW_MS);
+  pendingInternalChanges.set(id, timer);
+}
+
+/**
+ * Returns true (and clears the flag) when the change for `teamFilePath` was
+ * authored by the extension. External edits always return false.
+ */
+export function consumeInternalChange(teamFilePath: string): boolean {
+  const id = key(teamFilePath);
+  const timer = pendingInternalChanges.get(id);
+  if (!timer) {
+    return false;
+  }
+  clearTimeout(timer);
+  pendingInternalChanges.delete(id);
+  log('Ignoring internal team.md change for', teamFilePath);
+  return true;
+}
+
+/** Test/dispose helper — drops every pending suppression flag. */
+export function clearInternalChanges(): void {
+  for (const timer of pendingInternalChanges.values()) {
+    clearTimeout(timer);
+  }
+  pendingInternalChanges.clear();
 }

@@ -99,9 +99,13 @@ function emptyAgentStatistics(): AgentStatistics {
  * source of truth defined in team.md. Falls back to well-known identities
  * (Scribe, Ralph) by name, then a generic person emoji.
  */
-function deriveMemberEmoji(member: TeamState['members'][number]): string {
+export function deriveMemberEmoji(member: TeamState['members'][number]): string {
   const statusEmoji = member.status?.trim().split(/\s+/)[0];
-  if (statusEmoji && /\p{Emoji}/u.test(statusEmoji)) {
+  // '✅' is the generic default status glyph for ordinary "Active" members
+  // (see serializer.ts: `m.status ?? '✅ Active'`) — it is not an identity
+  // marker like Scribe's '📋' or Ralph's '🔄', so it must not be honored
+  // here or every plain active member would incorrectly render '✅'.
+  if (statusEmoji && statusEmoji !== '✅' && /\p{Emoji}/u.test(statusEmoji)) {
     return statusEmoji;
   }
   const lower = member.name.toLowerCase();

@@ -21,7 +21,7 @@ function parseProjectContext(section: string): ProjectContext {
       ctx.description = value;
     } else if (key === 'tech stack' || key === 'stack') {
       ctx.techStack = value;
-    } else if (key === 'user') {
+    } else if (key === 'user' || key === 'owner' || key === 'lead') {
       ctx.user = value;
     }
   }
@@ -40,11 +40,56 @@ function classifyMember(member: Member): Member['section'] {
   return 'members';
 }
 
-function parseMembersTable(tableSection: string): Member[] {
+interface ColumnMap {
+  name: number;
+  role: number;
+  charter?: number;
+  status?: number;
+  notes?: number;
+}
+
+/**
+ * Parse a table header row into a column-name -> index map so table shape
+ * (e.g. the `## Coordinator` table's `Name | Role | Notes` vs the
+ * `## Members` table's `Name | Role | Charter | Status | Notes`) doesn't
+ * have to match a fixed column order.
+ */
+function parseHeaderColumns(headerLine: string): ColumnMap | null {
+  const cells = headerLine
+    .trim()
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim().toLowerCase());
+  const nameIdx = cells.indexOf('name');
+  const roleIdx = cells.indexOf('role');
+  if (nameIdx === -1 || roleIdx === -1) {
+    return null;
+  }
+  const charterIdx = cells.indexOf('charter');
+  const statusIdx = cells.indexOf('status');
+  const notesIdx = cells.indexOf('notes');
+  return {
+    name: nameIdx,
+    role: roleIdx,
+    charter: charterIdx !== -1 ? charterIdx : undefined,
+    status: statusIdx !== -1 ? statusIdx : undefined,
+    notes: notesIdx !== -1 ? notesIdx : undefined,
+  };
+}
+
+/**
+ * Parse a markdown roster table into Members.
+ * @param tableSection - Raw section content containing the table.
+ * @param forcedSection - When the table comes from a dedicated
+ *   `## Coordinator` / `## Members` / `## Coding Agent` heading, every row
+ *   belongs to that section. When `null` (single-table legacy format), each
+ *   row is classified individually via `classifyMember`.
+ */
+function parseMembersTable(tableSection: string, forcedSection: Member['section'] | null): Member[] {
   const lines = tableSection.split('\n').filter((l) => l.trim().length > 0);
   const members: Member[] = [];
 
-  let headerFound = false;
+  let columns: ColumnMap | null = null;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('|')) {
@@ -52,10 +97,8 @@ function parseMembersTable(tableSection: string): Member[] {
     }
 
     // Detect header row by checking for known column names
-    if (!headerFound) {
-      if (trimmed.toLowerCase().includes('name') && trimmed.toLowerCase().includes('role')) {
-        headerFound = true;
-      }
+    if (!columns) {
+      columns = parseHeaderColumns(trimmed);
       continue;
     }
 
@@ -70,20 +113,23 @@ function parseMembersTable(tableSection: string): Member[] {
       .slice(1, -1) // remove leading/trailing empty strings from split
       .map((c) => c.trim());
 
-    if (cells.length < 2) {
+    if (cells.length <= columns.role) {
       continue;
     }
 
+    const cell = (idx?: number): string | undefined => (idx !== undefined ? cells[idx] : undefined);
+    const charter = cell(columns.charter);
+
     const member: Member = {
-      name: cells[0] ?? '',
-      role: cells[1] ?? '',
-      charter: cells[2] && cells[2] !== '—' ? cells[2] : undefined,
-      status: cells[3] || undefined,
-      notes: cells[4] || undefined,
-      section: 'members', // placeholder, classified below
+      name: cell(columns.name) ?? '',
+      role: cell(columns.role) ?? '',
+      charter: charter && charter !== '—' ? charter : undefined,
+      status: cell(columns.status) || undefined,
+      notes: cell(columns.notes) || undefined,
+      section: forcedSection ?? 'members', // placeholder, classified below when not forced
     };
 
-    member.section = classifyMember(member);
+    member.section = forcedSection ?? classifyMember(member);
     members.push(member);
   }
 
@@ -142,10 +188,27 @@ export function parseTeamFile(content: string, filePath: string): TeamState {
     state.projectContext = parseProjectContext(contextSection);
   }
 
-  // Parse members table
+  // Parse roster. Squad files may use distinct `## Coordinator` / `## Members` /
+  // `## Coding Agent` sections, or a single `## Members` table with mixed roles
+  // (legacy format). Prefer the multi-section layout when any dedicated
+  // Coordinator/Coding Agent heading is present, falling back to role-based
+  // classification of a single table otherwise.
+  const coordinatorSection = extractSection(content, '## Coordinator');
   const membersSection = extractSection(content, '## Members');
-  if (membersSection) {
-    const allMembers = parseMembersTable(membersSection);
+  const codingAgentSection = extractSection(content, '## Coding Agent');
+
+  if (coordinatorSection || codingAgentSection) {
+    if (coordinatorSection) {
+      state.coordinator = parseMembersTable(coordinatorSection, 'coordinator')[0] ?? null;
+    }
+    if (membersSection) {
+      state.members.push(...parseMembersTable(membersSection, 'members'));
+    }
+    if (codingAgentSection) {
+      state.codingAgent = parseMembersTable(codingAgentSection, 'codingAgent')[0] ?? null;
+    }
+  } else if (membersSection) {
+    const allMembers = parseMembersTable(membersSection, null);
     for (const member of allMembers) {
       switch (member.section) {
         case 'coordinator':

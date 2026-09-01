@@ -50,13 +50,34 @@ function emptyAgentStatistics(): AgentStatistics {
   };
 }
 
+/**
+ * Derives a roster emoji for a member. Prefers the leading emoji found in the
+ * member's `status` column (e.g. "📋 Silent", "🔄 Monitor") since that is the
+ * source of truth defined in team.md. Falls back to well-known identities
+ * (Scribe, Ralph) by name, then a generic person emoji.
+ */
+function deriveMemberEmoji(member: TeamState['members'][number]): string {
+  const statusEmoji = member.status?.trim().split(/\s+/)[0];
+  if (statusEmoji && /\p{Emoji}/u.test(statusEmoji)) {
+    return statusEmoji;
+  }
+  const lower = member.name.toLowerCase();
+  if (lower === 'scribe') {
+    return '📋';
+  }
+  if (lower === 'ralph') {
+    return '🔄';
+  }
+  return '👤';
+}
+
 function buildAgentMap(teamState: TeamState): Map<string, AgentRuntime> {
   const agents = new Map<string, AgentRuntime>();
   for (const member of teamState.members) {
     agents.set(member.name, {
       name: member.name,
       role: member.role,
-      emoji: '👤',
+      emoji: deriveMemberEmoji(member),
       charter: member.charter,
       status: 'idle',
       statistics: emptyAgentStatistics(),
